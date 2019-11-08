@@ -1,15 +1,15 @@
 require('dotenv').config();
-
 const fs = require('fs');
-const Slack = require('slack-node');  // 슬랙 모듈 사용
+const { promisify } = require('util');
+const Slack = require('slack-node');
 
-const { SLACK_API_TOKEN, WEB_HOOK_URL, FILE_PATH } = process.env;
-//const slack = new Slack(SLACK_API_TOKEN);
+const readFile = promisify(fs.readFile);
+const { WEB_HOOK_URL } = process.env;
 const slack = new Slack();
+const request = promisify(slack.webhook);
 slack.setWebhook(WEB_HOOK_URL);
 
-const restaurants = JSON.parse(fs.readFileSync(FILE_PATH));
-
+const MAX_PEEK = 8;
 const colors = [
   '#dee2e6',
   '#ffa8a8',
@@ -26,75 +26,60 @@ const colors = [
   '#ffc078',
 ];
 
-const randomlyPick = (array, num = 5) => {
-  const picked = [];
-  const len = array.length;
-  let randIdx;
-  let cnt = 0;
-
-  if (len < num) return array;
-
-  while (cnt < num) {
-    while (true) {
-      randIdx = Math.floor(Math.random() * len);
-      if (!picked.includes(randIdx)) break;
-    }
-    picked.push(randIdx);
-    cnt++;
-  }
-
-  return picked.map(idx => array[idx]);
+const getRandom = max => {
+  return Math.floor(Math.random() * max);
 };
 
-const makeAttachments = () => {
-  const color = randomlyPick(colors, 1)[0];
-  const fields = randomlyPick(restaurants).map(item => {
-    const { title, star, href, type } = item;
+const getDailyRestaurants = async () => {
+  const restaurants = JSON.parse(await readFile('restaurants.json', 'utf-8'));
+  const peekSet = new Set();
+  const length = restaurants.length;
+
+  while (peekSet.size < MAX_PEEK) {
+    peekSet.add(getRandom(length));
+  }
+
+  const peekRestaurants = [];
+
+  for (let number of peekSet) {
+    peekRestaurants.push(restaurants[number]);
+  }
+
+  return peekRestaurants;
+};
+
+const makeAttachments = peekRestaurants => {
+  const colorLength = colors.length;
+  const random = getRandom(colorLength);
+  const color = colors[random];
+
+  const fields = peekRestaurants.map(restaurant => {
+    const { title, star, href, type } = restaurant;
     return {
       fallback: title,
       title: `${title} (${star})`,
       value: `${type} : ${href}`,
       short: false,
-    }
+    };
   });
 
-  return [{
-    color,
-    fields
-  }]
+  return [
+    {
+      color,
+      fields,
+    },
+  ];
 };
 
-const makeText = () => randomlyPick(restaurants)
-  .map(({ title, href, type, star }) => `${title}(${star}) - ${type} : ${href}`)
-  .join('\n');
-
-/*
 const send = async () => {
-  slack.api('chat.postMessage', {
-    username: '음식요정',  // 슬랙에 표시될 봇이름
-    text: makeText(),
-    channel: '#random',  // 전송될 채널 및 유저
-    // attachments
-  }, function (err, response) {
-  });
-}
+  const restaurants = await getDailyRestaurants();
+  const attachments = makeAttachments(restaurants);
+
+  return request({ text: '음식 요정이에요~!', attachments });
+};
+
+module.exports = {
+  main: send,
+};
 
 send();
-*/
-
-const send = async () => {
-  const attachments = makeAttachments();
-
-  slack.webhook({
-    text: "음식 요정이에요~!",
-    attachments
-  }, function (err, response) {
-    console.log(response);
-  });
-}
-
-send();
-
-
-//console.log(randomlyPick(restaurants));
-//console.log(makeAttachments());
